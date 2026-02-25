@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "181001697977",
+    "project_id": "doadores-sangue",
+    "storage_bucket": "doadores-sangue.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:181001697977:android:d57e81d1d02fa6600fb968",
+        "android_client_info": {
+          "package_name": "com.paulo.doadoressangue"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAW6jSJqo9y6I-k8KI0482tcZFGLvjRBTQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

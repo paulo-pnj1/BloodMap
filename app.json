@@ -1,0 +1,99 @@
+{
+  "expo": {
+    "name": "BloodMap",
+    "slug": "BloodMap",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "scheme": "bloodmap",
+    "icon": "./assets/bloodmap-icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.paulo.doadoressangue"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptivebloodmap-icon.png",
+        "backgroundColor": "#FFFFFF"
+      },
+      "package": "com.paulo.doadoressangue",
+      "googleServicesFile": "./google-services.json",
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "POST_NOTIFICATIONS"
+      ],
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyA2XxbLcW1G7uGmskR7H3Za_4AqtwL8bPs"
+        }
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Permita acesso à localização para encontrar doadores próximos."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/bloodmap-icon.png",
+          "color": "#FF0000",
+          "androidMode": "collapse",
+          "androidCollapsedTitle": "{unread_notifications} pedidos urgentes",
+          "androidActions": [
+            {
+              "title": "📞 Ligar",
+              "pressAction": { "id": "call", "launch": false }
+            },
+            {
+              "title": "💬 SMS",
+              "pressAction": { "id": "sms", "launch": false }
+            },
+            {
+              "title": "WhatsApp",
+              "pressAction": { "id": "whatsapp", "launch": false }
+            },
+            {
+              "title": "Ver Detalhes",
+              "pressAction": { "id": "view", "launch": true }
+            }
+          ]
+        }
+      ],
+      "expo-router",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "reactNativeArchitectures": ["arm64-v8a", "x86_64"]
+          }
+        }
+      ],
+      "expo-font"
+    ],
+    "experiments": {
+      "typedRoutes": false
+    },
+    "extra": {
+      "firebase": {
+        "projectId": "doadores-sangue"
+      },
+      "router": {},
+      "eas": {
+        "projectId": "26fb4ab2-00ce-48e9-abf3-cdbe6c11ee99"
+      }
+    }
+  }
+}
