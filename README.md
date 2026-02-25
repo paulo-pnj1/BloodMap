@@ -1,7 +1,7 @@
 # BloodMap
 
 <p align="center">
-  <img src="https://via.placeholder.com/600x300/8B0000/FFFFFF?text=BloodMap" alt="BloodMap" width="600"/>
+  <img src="https://github.com/paulo-pnj1/BloodMap/blob/ca754feff3c8a642a4d8ad9e62ffa9684b9fb911/bloodmap-icon.png" alt="BloodMap" width="600"/>
   <br>
   <strong>Localização rápida de doadores de sangue por geolocalização</strong>
 </p>
