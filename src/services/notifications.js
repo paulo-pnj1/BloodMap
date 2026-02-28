@@ -1,5 +1,6 @@
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
+import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { doc, setDoc, getDocs, collection, query, where } from 'firebase/firestore';
 import { db } from './firebase';
@@ -35,7 +36,11 @@ export class NotificationService {
     }
 
     try {
-      const tokenData = await Notifications.getExpoPushTokenAsync();
+      // projectId necessário para builds standalone (APK) - Expo usa para gerar token válido
+      const projectId = Constants.expoConfig?.extra?.eas?.projectId;
+      const tokenData = await Notifications.getExpoPushTokenAsync(
+        projectId ? { projectId } : undefined
+      );
       const pushToken = tokenData.data;
       
       console.log('🔔 Push Token Gerado:', pushToken);
@@ -103,8 +108,9 @@ export class NotificationService {
       });
 
       const result = await response.json();
-      
-      if (result.data?.status === 'ok') {
+      // API Expo retorna { data: [{ status: 'ok', id: '...' }] } para mensagem única
+      const ok = Array.isArray(result.data) ? result.data[0]?.status === 'ok' : result.data?.status === 'ok';
+      if (ok) {
         console.log('✅ Notificação enviada com sucesso');
         return true;
       } else {

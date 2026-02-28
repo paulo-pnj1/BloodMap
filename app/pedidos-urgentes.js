@@ -10,6 +10,7 @@ import { db, auth } from '../src/services/firebase';
 import { MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { PedidoErrorService, executeWithErrorHandling } from '../src/services/pedidoErrorService';
+import { NotificationService } from '../src/services/notifications';
 
 const { width, height } = Dimensions.get('window');
 
@@ -240,7 +241,31 @@ export default function TelaPedidosUrgentes() {
         updatedAt: new Date().toISOString()
       };
 
-      await criarPedidoNoFirestore(pedidoData);
+      const pedidoId = await criarPedidoNoFirestore(pedidoData);
+
+      // Enviar notificações push aos doadores próximos (excluir quem criou o pedido)
+      const currentUid = auth.currentUser?.uid;
+      const doadoresParaNotificar = currentUid
+        ? doadoresProximos.filter(d => d.id !== currentUid)
+        : doadoresProximos;
+      const tokens = doadoresParaNotificar
+        .map(d => d.pushToken)
+        .filter(Boolean);
+
+      if (tokens.length > 0) {
+        const titulo = `Urgente: Pedido de sangue ${tipoSanguineo}`;
+        const corpo = `${hospitalName.trim()} - ${mensagem.trim().slice(0, 80)}${mensagem.trim().length > 80 ? '...' : ''}`;
+        try {
+          await NotificationService.sendBulkNotifications(tokens, titulo, corpo, {
+            pedidoId,
+            telefone: phoneNumber.trim(),
+            tipoSanguineo,
+            hospital: hospitalName.trim(),
+          });
+        } catch (err) {
+          console.warn('Erro ao enviar notificações:', err);
+        }
+      }
 
       showSuccessAlert(codigo, doadoresProximos.length);
       resetForm();

@@ -9,6 +9,7 @@ import * as Device from 'expo-device';
 import NotificationHandler from '../src/components/NotificationHandler';
 import { AuthProvider } from '../src/contexts/AuthContext';
 import { NotificationService } from '../src/services/notifications';
+import Constants from 'expo-constants';
 
 // Configurar o handler de notificações
 Notifications.setNotificationHandler({
@@ -97,8 +98,17 @@ function RootLayoutContent() {
           return;
         }
         
-        const token = (await Notifications.getExpoPushTokenAsync()).data;
+        const projectId = Constants.expoConfig?.extra?.eas?.projectId;
+        const tokenData = await Notifications.getExpoPushTokenAsync(
+          projectId ? { projectId } : undefined
+        );
+        const token = tokenData.data;
         console.log('🔔 Push Token:', token);
+        // Salvar token no Firestore se o usuário estiver logado (para APK/standalone)
+        const { auth } = await import('../src/services/firebase');
+        if (auth.currentUser?.uid && token) {
+          await NotificationService.savePushToken(auth.currentUser.uid, token);
+        }
       } else {
         console.log('Notificações push só funcionam em dispositivos físicos');
       }
