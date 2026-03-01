@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
   Linking 
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Card, Button, TextInput, Switch, Badge } from 'react-native-paper';
 import { Picker } from '@react-native-picker/picker';
 import { doc, getDoc, updateDoc, collection, query, where, getDocs, orderBy } from 'firebase/firestore';
@@ -18,6 +19,7 @@ import { router, usePathname } from 'expo-router';
 import { auth, db } from '../src/services/firebase';
 import { FontAwesome } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { getContagemRegressiva, podeDoar, getDiasIntervalo } from '../src/utils/availability';
 
 // Constantes e configurações
 const BLOOD_TYPE_COLORS = {
@@ -55,8 +57,12 @@ export default function TelaPerfil() {
     nome: '',
     tipoSanguineo: 'O+',
     telefone: '',
+    sexo: 'M',
     disponivel: false,
-    location: null
+    location: null,
+    ultimaDoacao: null,
+    historicoDoacoes: [],
+    compartilharLocalizacao: true,
   });
   
   // Estados da UI
@@ -77,6 +83,7 @@ export default function TelaPerfil() {
 
   const notificationCount = pedidosPendentes.length;
   const pathname = usePathname();
+  const insets = useSafeAreaInsets();
 
   // Efeitos
   useEffect(() => {
@@ -136,8 +143,12 @@ export default function TelaPerfil() {
           nome: data.nome || '',
           tipoSanguineo: data.tipoSanguineo || 'O+',
           telefone: data.telefone || '',
+          sexo: data.sexo || 'M',
           disponivel: data.disponivel || false,
-          location: data.localizacao || null
+          location: data.localizacao || null,
+          ultimaDoacao: data.ultimaDoacao || null,
+          historicoDoacoes: data.historicoDoacoes || [],
+          compartilharLocalizacao: data.compartilharLocalizacao !== false,
         });
       } else {
         Alert.alert('Perfil Não Encontrado', 'Complete seu cadastro como doador.');
@@ -166,9 +177,9 @@ export default function TelaPerfil() {
       );
       
       const snapshot = await getDocs(pedidosQuery);
-      const pedidos = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
+      const pedidos = snapshot.docs.map((d) => ({
+        id: d.id,
+        ...d.data()
       }));
       
       setPedidosPendentes(pedidos);
@@ -194,9 +205,9 @@ export default function TelaPerfil() {
       );
       
       const snapshot = await getDocs(pedidosQuery);
-      let pedidos = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
+      let pedidos = snapshot.docs.map((d) => ({
+        id: d.id,
+        ...d.data()
       }));
       
       // Ordena localmente por data (mais recente primeiro)
@@ -218,9 +229,9 @@ export default function TelaPerfil() {
         );
         
         const snapshot = await getDocs(pedidosQuery);
-        let pedidos = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
+        let pedidos = snapshot.docs.map((d) => ({
+          id: d.id,
+          ...d.data()
         }));
         
         // Filtra localmente por status
@@ -303,7 +314,9 @@ export default function TelaPerfil() {
         nome: userData.nome.trim(),
         tipoSanguineo: userData.tipoSanguineo,
         telefone: userData.telefone.trim(),
+        sexo: userData.sexo,
         disponivel: userData.disponivel,
+        compartilharLocalizacao: userData.compartilharLocalizacao,
         updatedAt: new Date().toISOString(),
         ...(userData.location && { localizacao: userData.location })
       };
@@ -325,13 +338,17 @@ export default function TelaPerfil() {
 
   // Funções de gerenciamento de pedidos
   const aceitarPedido = async (pedidoId) => {
+    const user = auth.currentUser;
+    if (!user) {
+      Alert.alert('Erro', 'Usuário não autenticado.');
+      return;
+    }
+    if (!podeDoar(userData.ultimaDoacao, userData.sexo)) {
+      const { dias } = getContagemRegressiva(userData.ultimaDoacao, userData.sexo);
+      Alert.alert('Indisponível', `Você só pode doar novamente em ${dias} dia(s). Aguarde o intervalo entre doações.`);
+      return;
+    }
     try {
-      const user = auth.currentUser;
-      if (!user) {
-        Alert.alert('Erro', 'Usuário não autenticado.');
-        return;
-      }
-
       // Marca o pedido como aceito localmente
       setPedidosAceitosMap(prev => ({
         ...prev,
@@ -518,6 +535,17 @@ export default function TelaPerfil() {
   const getUrgenciaColor = (urgencia) => URGENCY_COLORS[urgencia] || URGENCY_COLORS.default;
 
   const handleUserDataChange = (field, value) => {
+    if (field === 'disponivel' && value === true) {
+      const pode = podeDoar(userData.ultimaDoacao, userData.sexo);
+      if (!pode && userData.ultimaDoacao) {
+        const { dias, proximaData } = getContagemRegressiva(userData.ultimaDoacao, userData.sexo);
+        Alert.alert(
+          'Aguardar intervalo',
+          `Você pode doar novamente em ${dias} dia(s).\nPróxima data permitida: ${proximaData?.toLocaleDateString('pt-BR') || '-'}\n\nHomens: 60 dias entre doações.\nMulheres: 90 dias.`
+        );
+        return;
+      }
+    }
     setUserData(prev => ({ ...prev, [field]: value }));
   };
 
@@ -647,6 +675,7 @@ export default function TelaPerfil() {
         {renderPersonalInfoSection()}
         {renderDonationStatusSection()}
         {renderLocationSection()}
+        {renderHistoricoDoacoes()}
         {renderActionButtons()}
       </LinearGradient>
     </Card>
@@ -727,6 +756,18 @@ export default function TelaPerfil() {
                   : 'Você não aparecerá no mapa para solicitações'
                 }
               </Text>
+              {userData.ultimaDoacao && (() => {
+                const { dias, disponivel } = getContagemRegressiva(userData.ultimaDoacao, userData.sexo);
+                const intervalo = getDiasIntervalo(userData.sexo);
+                if (!disponivel) {
+                  return (
+                    <Text style={styles.countdownText}>
+                      ⏱ Próxima doação em {dias} dia(s) (intervalo: {intervalo} dias para {userData.sexo === 'F' ? 'mulheres' : 'homens'})
+                    </Text>
+                  );
+                }
+                return null;
+              })()}
             </View>
           </View>
           <Switch
@@ -763,6 +804,16 @@ export default function TelaPerfil() {
         </View>
       </Card>
       
+      <View style={styles.shareLocationRow}>
+        <Text style={styles.shareLocationLabel}>Compartilhar localização com hospitais</Text>
+        <Switch
+          value={userData.compartilharLocalizacao}
+          onValueChange={(value) => handleUserDataChange('compartilharLocalizacao', value)}
+          trackColor={{ false: '#767577', true: '#FFCDD2' }}
+          thumbColor={userData.compartilharLocalizacao ? '#D32F2F' : '#f4f3f4'}
+        />
+      </View>
+      
       <Button
         icon="crosshairs-gps"
         mode="outlined"
@@ -775,6 +826,30 @@ export default function TelaPerfil() {
       >
         {updatingLocation ? 'Buscando...' : 'Atualizar Localização'}
       </Button>
+    </View>
+  );
+
+  const renderHistoricoDoacoes = () => (
+    <View style={styles.section}>
+      <View style={styles.sectionHeader}>
+        <FontAwesome name="history" size={20} color="#D32F2F" />
+        <Text style={styles.sectionTitle}>Histórico de Doações</Text>
+      </View>
+      <Card style={styles.historicoCard}>
+        {(!userData.historicoDoacoes || userData.historicoDoacoes.length === 0) ? (
+          <Text style={styles.historicoEmpty}>Nenhuma doação registrada ainda.</Text>
+        ) : (
+          userData.historicoDoacoes.slice(0, 10).map((item, idx) => (
+            <View key={idx} style={styles.historicoItem}>
+              <FontAwesome name="tint" size={16} color="#D32F2F" />
+              <Text style={styles.historicoText}>
+                {item.data ? new Date(item.data).toLocaleDateString('pt-BR') : '-'}
+                {item.hospital ? ` • ${item.hospital}` : ''}
+              </Text>
+            </View>
+          ))
+        )}
+      </Card>
     </View>
   );
 
@@ -1072,7 +1147,10 @@ export default function TelaPerfil() {
       {renderTopMenu()}
 
       <ScrollView 
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingTop: insets.top + 4, paddingBottom: Math.max(24, insets.bottom) },
+        ]}
         showsVerticalScrollIndicator={false}
       >
         <Animated.View 
@@ -1376,6 +1454,45 @@ const styles = StyleSheet.create({
     color: '#D32F2F',
     fontWeight: '600',
     fontSize: 16,
+  },
+  countdownText: {
+    fontSize: 13,
+    color: '#666',
+    marginTop: 8,
+  },
+  shareLocationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+    paddingVertical: 8,
+  },
+  shareLocationLabel: {
+    fontSize: 15,
+    color: '#333',
+    flex: 1,
+  },
+  historicoCard: {
+    padding: 16,
+    borderRadius: 12,
+  },
+  historicoEmpty: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    paddingVertical: 12,
+  },
+  historicoItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  historicoText: {
+    fontSize: 14,
+    color: '#333',
+    marginLeft: 10,
   },
   actionsSection: {
     marginTop: 10,

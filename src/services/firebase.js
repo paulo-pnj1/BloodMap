@@ -2,27 +2,38 @@ import { initializeApp, getApps, getApp } from "firebase/app";
 import { initializeAuth, getAuth, getReactNativePersistence } from "firebase/auth";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getFirestore } from "firebase/firestore";
+import Constants from "expo-constants";
 
+// Config: Expo extra (app.config.js) ou env (NEXT_PUBLIC_ / EXPO_PUBLIC_)
+const extra = Constants.expoConfig?.extra?.firebase || {};
 const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+  apiKey: extra.apiKey || process.env.EXPO_PUBLIC_FIREBASE_API_KEY || process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+  authDomain: extra.authDomain || process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN || process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId: extra.projectId || process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket: extra.storageBucket || process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET || process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: extra.messagingSenderId || process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  appId: extra.appId || process.env.EXPO_PUBLIC_FIREBASE_APP_ID || process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
+
+if (!firebaseConfig.apiKey) {
+  console.warn("Firebase: apiKey ausente. Defina em .env (EXPO_PUBLIC_FIREBASE_API_KEY) ou use google-services.json.");
+}
 
 // ✅ Garante que o app não é inicializado duas vezes
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
-// ✅ Garante que o Auth também não é inicializado mais de uma vez
+// ✅ React Native: persistência com AsyncStorage; se já inicializado (hot reload), usa getAuth
 let auth;
 try {
-  auth = getAuth(app);
-} catch {
   auth = initializeAuth(app, {
-    persistence: getReactNativePersistence(AsyncStorage)
+    persistence: getReactNativePersistence(AsyncStorage),
   });
+} catch (e) {
+  if (e.code === "auth/already-initialized") {
+    auth = getAuth(app);
+  } else {
+    throw e;
+  }
 }
 
 export const db = getFirestore(app);

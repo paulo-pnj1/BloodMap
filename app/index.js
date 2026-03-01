@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, Alert, Dimensions, Animated, TouchableOpacity, Modal, ScrollView, TextInput, KeyboardAvoidingView, Platform, Pressable } from 'react-native';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { View, Text, StyleSheet, Alert, Dimensions, Animated, Modal, ScrollView, TextInput, KeyboardAvoidingView, Platform, Pressable } from 'react-native';
 import { Card, ActivityIndicator } from 'react-native-paper';
 import MapView, { Marker, Callout } from 'react-native-maps';
-import { collection, query, where, onSnapshot, addDoc, orderBy, serverTimestamp, getDocs } from 'firebase/firestore';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { collection, query, where, onSnapshot, addDoc, orderBy, serverTimestamp, getDocs, doc, getDoc } from 'firebase/firestore';
 import { signInAnonymously } from 'firebase/auth';
 import { haversineDistance } from '../src/utils/distance';
 import * as Location from 'expo-location';
@@ -13,7 +14,8 @@ import { FontAwesome } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { NotificationService } from '../src/services/notifications';
 
-const { width, height } = Dimensions.get('window');
+const { width } = Dimensions.get('window');
+const DEFAULT_LOCATION = { coords: { latitude: -7.612, longitude: 15.056 } };
 
 // Esquema de cores harmonizado
 const colors = {
@@ -158,6 +160,7 @@ export default function TelaMapaPublico() {
   const [doadores, setDoadores] = useState([]);
   const [errorMsg, setErrorMsg] = useState(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   const [filtroTipoSanguineo, setFiltroTipoSanguineo] = useState('Todos');
   const [doadorSelecionado, setDoadorSelecionado] = useState(null);
@@ -171,9 +174,10 @@ export default function TelaMapaPublico() {
   const router = useRouter();
   const scrollViewRef = useRef(null);
   const unsubscribeMensagensRef = useRef(null);
+  const insets = useSafeAreaInsets();
 
   // Tipos sanguíneos disponíveis para filtro
-  const tiposSanguineos = ['Todos', 'O+', 'O-', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-'];
+  const tiposSanguineos = useMemo(() => ['Todos', 'O+', 'O-', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-'], []);
 
   // Função auxiliar para inicialização com tratamento de erro
   const initializeWithErrorHandling = async (operation, context, fallback = null) => {
@@ -194,7 +198,20 @@ export default function TelaMapaPublico() {
   useEffect(() => {
     const initializeApp = async () => {
       try {
-        setIsLoggedIn(!!auth.currentUser);
+        const currentUser = auth.currentUser;
+        setIsLoggedIn(!!currentUser);
+        setIsAdmin(false);
+
+        // Verifica se o usuário atual é admin
+        if (currentUser) {
+          await initializeWithErrorHandling(
+            async () => {
+              const adminSnap = await getDoc(doc(db, 'admins', currentUser.uid));
+              setIsAdmin(adminSnap.exists());
+            },
+            'Verificar perfil admin'
+          );
+        }
         setLoading(true);
 
         // Carregar doadores do cache com tratamento de erro
@@ -207,24 +224,19 @@ export default function TelaMapaPublico() {
         );
 
         // Solicitar permissão de localização com tratamento de erro
-        await initializeWithErrorHandling(
-          async () => {
-            let { status } = await Location.requestForegroundPermissionsAsync();
-            if (status !== 'granted') {
-              throw new AppError(
-                'Permissão de localização negada. Usando Uíge como localização padrão.',
-                ErrorTypes.PERMISSION
-              );
-            } else {
-              let loc = await Location.getCurrentPositionAsync({ 
-                accuracy: Location.Accuracy.Balanced 
-              });
-              setLocation(loc);
-            }
-          },
-          'Solicitar localização',
-          setLocation({ coords: { latitude: -7.612, longitude: 15.056 } })
-        );
+        try {
+          const { status } = await Location.requestForegroundPermissionsAsync();
+          if (status !== 'granted') {
+            setLocation(DEFAULT_LOCATION);
+          } else {
+            const loc = await Location.getCurrentPositionAsync({
+              accuracy: Location.Accuracy.Balanced,
+            });
+            setLocation(loc);
+          }
+        } catch (_) {
+          setLocation(DEFAULT_LOCATION);
+        }
 
         setLoading(false);
         
@@ -259,25 +271,31 @@ export default function TelaMapaPublico() {
     initializeApp();
 
     // Listener para autenticação
-    const unsubscribeAuth = auth.onAuthStateChanged((user) => {
+    const unsubscribeAuth = auth.onAuthStateChanged(async (user) => {
       setIsLoggedIn(!!user);
+      setIsAdmin(false);
+
+      if (user) {
+        await initializeWithErrorHandling(
+          async () => {
+            const adminSnap = await getDoc(doc(db, 'admins', user.uid));
+            setIsAdmin(adminSnap.exists());
+          },
+          'Verificar perfil admin (auth listener)'
+        );
+      }
     });
 
     // Listener para doadores em tempo real com tratamento de erro
     const q = query(collection(db, 'usuarios'), where('disponivel', '==', true));
-    const unsubscribeDoadores = onSnapshot(q, 
-      async (snapshot) => {
-        try {
-          const doadoresList = snapshot.docs.map(doc => ({ 
-            id: doc.id, 
-            ...doc.data() 
-          }));
-          await cacheDoadores(doadoresList);
-          setDoadores(doadoresList);
-        } catch (error) {
-          const errorResult = ErrorService.handleError(error, 'Snapshot doadores');
-          ErrorService.logError(error, 'Snapshot doadores');
-        }
+    const unsubscribeDoadores = onSnapshot(q,
+      (snapshot) => {
+        const doadoresList = snapshot.docs.map((d) => ({
+          id: d.id,
+          ...d.data(),
+        }));
+        cacheDoadores(doadoresList).catch((err) => ErrorService.logError(err, 'Cache doadores'));
+        setDoadores(doadoresList);
       },
       (error) => {
         const errorResult = ErrorService.handleError(error, 'Listener doadores');
@@ -316,33 +334,24 @@ export default function TelaMapaPublico() {
     return () => clearTimeout(timer);
   }, [mensagens]);
 
-  // Filtra doadores por tipo sanguíneo e proximidade
-  const doadoresProximos = location ? doadores
-    .filter(doador => {
-      const filtroTipo = filtroTipoSanguineo === 'Todos' || doador.tipoSanguineo === filtroTipoSanguineo;
-      
-      if (!doador.localizacao || !doador.localizacao.lat || !doador.localizacao.lng) {
-        return false;
-      }
-      
-      const distancia = haversineDistance(
-        location.coords.latitude, 
-        location.coords.longitude, 
-        doador.localizacao.lat, 
-        doador.localizacao.lng
-      );
-      return filtroTipo && distancia < 20;
-    })
-    .map(doador => ({
-      ...doador,
-      distancia: haversineDistance(
-        location.coords.latitude, 
-        location.coords.longitude, 
-        doador.localizacao.lat, 
-        doador.localizacao.lng
-      )
-    }))
-    .sort((a, b) => a.distancia - b.distancia) : [];
+  // Filtra doadores por tipo sanguíneo e proximidade (memoizado para performance)
+  const doadoresProximos = useMemo(() => {
+    if (!location) return [];
+    const lat = location.coords.latitude;
+    const lng = location.coords.longitude;
+    return doadores
+      .filter((doador) => {
+        const filtroTipo = filtroTipoSanguineo === 'Todos' || doador.tipoSanguineo === filtroTipoSanguineo;
+        if (!doador.localizacao?.lat || !doador.localizacao?.lng) return false;
+        const dist = haversineDistance(lat, lng, doador.localizacao.lat, doador.localizacao.lng);
+        return filtroTipo && dist < 20;
+      })
+      .map((doador) => ({
+        ...doador,
+        distancia: haversineDistance(lat, lng, doador.localizacao.lat, doador.localizacao.lng),
+      }))
+      .sort((a, b) => a.distancia - b.distancia);
+  }, [location, doadores, filtroTipoSanguineo]);
 
   const initialRegion = location ? {
     latitude: location.coords.latitude,
@@ -536,7 +545,7 @@ export default function TelaMapaPublico() {
     <Animated.View style={[styles.container, { opacity: fadeAnim }]}>
       {/* Header Principal */}
       <View style={styles.mainHeader}>
-        <LinearGradient colors={[colors.primary, colors.primaryDark]} style={styles.mainHeaderGradient}>
+        <LinearGradient colors={[colors.primary, colors.primaryDark]} style={[styles.mainHeaderGradient, { paddingTop: insets.top + 10 }]}>
           <View style={styles.headerTop}>
             <View style={styles.headerTitleContainer}>
               <FontAwesome name="tint" size={24} color={colors.textLight} />
@@ -601,8 +610,9 @@ export default function TelaMapaPublico() {
                     latitude: doador.localizacao.lat, 
                     longitude: doador.localizacao.lng 
                   }}
-                  title={`${doador.nome} (${doador.tipoSanguineo})`}
-                  pinColor={colors.primaryLight}
+                  title={`${doador.tipoSanguineo} - ${doador.nome}`}
+                  pinColor={getBloodTypeColor(doador.tipoSanguineo)}
+                  tracksViewChanges={false}
                   onPress={() => handleMarkerPress(doador)}
                 >
                   <Callout tooltip>
@@ -707,7 +717,7 @@ export default function TelaMapaPublico() {
                         </View>
                       </View>
                       <View style={styles.doadorContato}>
-                        <FontAwesome name="phone" size={12} color={colors.textSecondary} />
+                        <FontAwesome name="phone" size={14} color={colors.textSecondary} />
                         <Text style={styles.doadorTelefone}>{doador.telefone}</Text>
                       </View>
                     </LinearGradient>
@@ -817,7 +827,7 @@ export default function TelaMapaPublico() {
                         setModalVisivel(false);
                       }}
                     >
-                      <FontAwesome name="phone" size={18} color={colors.textLight} />
+                      <FontAwesome name="phone" size={16} color={colors.textLight} />
                       <Text style={styles.modalBtnText}>Ligar</Text>
                     </Pressable>
                     
@@ -828,7 +838,7 @@ export default function TelaMapaPublico() {
                         setModalVisivel(false);
                       }}
                     >
-                      <FontAwesome name="whatsapp" size={18} color={colors.textLight} />
+                      <FontAwesome name="whatsapp" size={16} color={colors.textLight} />
                       <Text style={styles.modalBtnText}>WhatsApp</Text>
                     </Pressable>
 
@@ -886,13 +896,13 @@ export default function TelaMapaPublico() {
                       style={({pressed}) => [{...styles.chatAcaoBtn}, pressed && {opacity: 0.7}]}
                       onPress={() => ligarDoador(doadorSelecionado.telefone)}
                     >
-                      <FontAwesome name="phone" size={16} color={colors.textLight} />
+                      <FontAwesome name="phone" size={20} color={colors.textLight} />
                     </Pressable>
                     <Pressable 
                       style={({pressed}) => [{...styles.chatAcaoBtn}, pressed && {opacity: 0.7}]}
                       onPress={() => whatsappDoador(doadorSelecionado.telefone)}
                     >
-                      <FontAwesome name="whatsapp" size={16} color={colors.textLight} />
+                      <FontAwesome name="whatsapp" size={20} color={colors.textLight} />
                     </Pressable>
                   </View>
                 </LinearGradient>
@@ -979,8 +989,8 @@ export default function TelaMapaPublico() {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* Bottom Actions */}
-      <View style={styles.bottomBar}>
+      {/* Bottom Actions - com safe area para não sobrepor teclas de navegação */}
+      <View style={[styles.bottomBar, { paddingBottom: Math.max(16, insets.bottom) }]}>
         {!isLoggedIn ? (
           <View style={styles.buttonContainer}>
             <Pressable 
@@ -988,25 +998,42 @@ export default function TelaMapaPublico() {
               onPress={() => router.push('/pedidos-urgentes')}
             >
               <FontAwesome name="exclamation-triangle" size={18} color={colors.textLight} />
-              <Text style={styles.buttonText}>Pedido Urgente</Text>
+              <Text style={styles.buttonText}>Pedido</Text>
             </Pressable>
             <Pressable 
               style={({pressed}) => [{...styles.actionButton, ...styles.donorButton}, pressed && {opacity: 0.7}]}
               onPress={() => router.push('/login')}
             >
               <FontAwesome name="heart" size={18} color={colors.textLight} />
-              <Text style={styles.buttonText}>Ser Doador</Text>
+              <Text style={styles.buttonText}>Doador</Text>
+            </Pressable>
+            <Pressable 
+              style={({pressed}) => [{...styles.actionButton, ...styles.adminButton}, pressed && {opacity: 0.7}]}
+              onPress={() => router.push('/admin')}
+            >
+              <FontAwesome name="hospital-o" size={18} color={colors.textLight} />
+              <Text style={styles.buttonText}>Hospital</Text>
             </Pressable>
           </View>
         ) : (
           <View style={styles.buttonContainer}>
-            <Pressable 
-              style={({pressed}) => [{...styles.actionButton, ...styles.profileButton}, pressed && {opacity: 0.7}]}
-              onPress={() => router.push('/perfil')}
-            >
-              <FontAwesome name="user" size={18} color={colors.textLight} />
-              <Text style={styles.buttonText}>Meu Perfil</Text>
-            </Pressable>
+            {isAdmin ? (
+              <Pressable 
+                style={({pressed}) => [{...styles.actionButton, ...styles.profileButton}, pressed && {opacity: 0.7}]}
+                onPress={() => router.push('/admin')}
+              >
+                <FontAwesome name="hospital-o" size={18} color={colors.textLight} />
+                <Text style={styles.buttonText}>Perfil Admin</Text>
+              </Pressable>
+            ) : (
+              <Pressable 
+                style={({pressed}) => [{...styles.actionButton, ...styles.profileButton}, pressed && {opacity: 0.7}]}
+                onPress={() => router.push('/perfil')}
+              >
+                <FontAwesome name="user" size={18} color={colors.textLight} />
+                <Text style={styles.buttonText}>Meu Perfil</Text>
+              </Pressable>
+            )}
             <Pressable 
               style={({pressed}) => [{...styles.actionButton, ...styles.logoutButton}, pressed && {opacity: 0.7}]}
               onPress={handleLogout}
@@ -1043,7 +1070,7 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 10,
     paddingBottom: 10,
-    paddingTop: 40,
+    paddingTop: 10,
     justifyContent: 'space-between',
   },
   headerTop: {
@@ -1309,7 +1336,8 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     borderTopWidth: 1,
     borderTopColor: colors.border,
-    marginBottom: -30,
+    
+    
   },
   filtroGradient: {
     padding: 12,
@@ -1607,6 +1635,7 @@ const styles = StyleSheet.create({
   },
   bottomBar: {
     padding: 16,
+    paddingHorizontal: 12,
     backgroundColor: colors.surface,
     borderTopWidth: 1,
     borderTopColor: colors.border,
@@ -1615,24 +1644,29 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     flexWrap: 'wrap',
-    marginBottom: 40,
   },
   actionButton: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 12,
-    borderRadius: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderRadius: 12,
     marginHorizontal: 6,
     marginBottom: 8,
-    minWidth: 80,
+    minWidth: 90,
+    minHeight: 48,
+    gap: 8,
   },
   urgentButton: {
     backgroundColor: colors.primaryLight,
   },
   donorButton: {
     backgroundColor: colors.accent,
+  },
+  adminButton: {
+    backgroundColor: colors.secondary,
   },
   profileButton: {
     backgroundColor: colors.secondary,
@@ -1642,8 +1676,8 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: colors.textLight,
-    fontSize: 14,
-    fontWeight: 'bold',
+    fontSize: 15,
+    fontWeight: '600',
     marginLeft: 8,
     textAlign: 'center',
   },

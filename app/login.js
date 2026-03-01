@@ -1,12 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Dimensions, Animated, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, Dimensions, Animated, ScrollView, Alert } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Card, Button, TextInput } from 'react-native-paper';
 import { LinearGradient } from 'expo-linear-gradient';
-import { signInWithEmailAndPassword } from 'firebase/auth';
+import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 import { router } from 'expo-router';
 import { auth } from '../src/services/firebase';
 import { FontAwesome } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  getCredentials,
+  saveCredentials,
+  deleteCredentials,
+  getRememberLogin,
+  setRememberLogin,
+  migrateFromAsyncStorage,
+} from '../src/utils/secureStorage';
 
 const { width } = Dimensions.get('window');
 
@@ -19,22 +27,22 @@ export default function TelaLoginDoador() {
   const [erro, setErro] = useState('');
   const [tipoErro, setTipoErro] = useState(''); // 'warning', 'error', 'info'
   const fadeAnim = useState(new Animated.Value(0))[0];
+  const insets = useSafeAreaInsets();
 
   React.useEffect(() => {
     Animated.timing(fadeAnim, { toValue: 1, duration: 500, useNativeDriver: true }).start();
     carregarDadosSalvos();
   }, []);
 
-  // Carregar dados salvos ao iniciar o componente
+  // Carregar dados salvos ao iniciar (credenciais em armazenamento seguro criptografado)
   const carregarDadosSalvos = async () => {
     try {
-      const savedEmail = await AsyncStorage.getItem('savedEmail');
-      const savedPassword = await AsyncStorage.getItem('savedPassword');
-      const rememberMe = await AsyncStorage.getItem('rememberLogin');
-      
-      if (savedEmail && savedPassword && rememberMe === 'true') {
-        setEmail(savedEmail);
-        setSenha(savedPassword);
+      await migrateFromAsyncStorage(); // migra credenciais antigas de AsyncStorage
+      const rememberMe = await getRememberLogin();
+      const cred = await getCredentials();
+      if (cred && rememberMe) {
+        setEmail(cred.email);
+        setSenha(cred.password);
         setLembrarLogin(true);
       }
     } catch (error) {
@@ -43,18 +51,14 @@ export default function TelaLoginDoador() {
     }
   };
 
-  // Salvar dados de login
+  // Salvar dados de login (credenciais em armazenamento seguro criptografado)
   const salvarDadosLogin = async (email, senha) => {
     try {
+      await setRememberLogin(lembrarLogin);
       if (lembrarLogin) {
-        await AsyncStorage.setItem('savedEmail', email);
-        await AsyncStorage.setItem('savedPassword', senha);
-        await AsyncStorage.setItem('rememberLogin', 'true');
+        await saveCredentials(email, senha);
       } else {
-        // Se não quiser lembrar, remove os dados salvos
-        await AsyncStorage.removeItem('savedEmail');
-        await AsyncStorage.removeItem('savedPassword');
-        await AsyncStorage.setItem('rememberLogin', 'false');
+        await deleteCredentials();
       }
     } catch (error) {
       console.log('Erro ao salvar dados:', error);
@@ -210,9 +214,45 @@ export default function TelaLoginDoador() {
 
   const estilosErro = getEstilosErro();
 
+  const handleRecuperarSenha = () => {
+    if (!email.trim()) {
+      Alert.alert(
+        'Recuperar senha',
+        'Digite seu e-mail no campo acima e toque em "Esqueci minha senha" novamente para receber o link de redefinição.'
+      );
+      return;
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      mostrarErro('Digite um e-mail válido para recuperar a senha.', 'warning');
+      return;
+    }
+    setLoading(true);
+    sendPasswordResetEmail(auth, email.trim())
+      .then(() => {
+        Alert.alert(
+          'E-mail enviado',
+          'Verifique sua caixa de entrada (e spam) para redefinir sua senha.'
+        );
+      })
+      .catch((err) => {
+        if (err.code === 'auth/user-not-found') {
+          Alert.alert('E-mail não encontrado', 'Não há conta cadastrada com este e-mail.');
+        } else {
+          Alert.alert('Erro', 'Não foi possível enviar o e-mail. Tente novamente.');
+        }
+      })
+      .finally(() => setLoading(false));
+  };
+
   return (
     <LinearGradient colors={['#FFF', '#E3F2FD']} style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingTop: insets.top + 8, paddingBottom: Math.max(20, insets.bottom) },
+        ]}
+      >
         <Animated.View style={[styles.content, { opacity: fadeAnim }]}>
           
           {/* Header */}
@@ -293,6 +333,16 @@ export default function TelaLoginDoador() {
                 </Button>
               </View>
 
+              {/* Recuperação de senha */}
+              <Button
+                mode="text"
+                onPress={handleRecuperarSenha}
+                style={styles.forgotButton}
+                labelStyle={styles.forgotButtonText}
+              >
+                Esqueci minha senha
+              </Button>
+
               {/* Botão Principal */}
               <Button
                 mode="contained"
@@ -346,7 +396,7 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     justifyContent: 'center',
-    paddingVertical: 20,
+    paddingVertical: 24,
   },
   content: {
     alignItems: 'center',
@@ -405,6 +455,13 @@ const styles = StyleSheet.create({
   },
   rememberButton: {
     borderRadius: 8,
+  },
+  forgotButton: {
+    marginBottom: 8,
+  },
+  forgotButtonText: {
+    fontSize: 14,
+    color: '#FF4444',
   },
   primaryButton: {
     borderRadius: 12,

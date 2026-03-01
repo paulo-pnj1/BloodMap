@@ -2,28 +2,16 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, Alert, Linking, Dimensions } from 'react-native';
 import { Card, Button } from 'react-native-paper';
 import { useLocalSearchParams, router } from 'expo-router';
-import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../../src/services/firebase';
 import { FontAwesome } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-
-interface PedidoData {
-  codigo: string;
-  tipoSanguineo: string;
-  mensagem: string;
-  solicitante: string;
-  hospital: string;
-  telefone: string;
-  status: string;
-  createdAt: string;
-  expiresAt: string;
-}
 
 const { width } = Dimensions.get('window');
 
 export default function BloodRequestDetails() {
   const { id, action, phoneNumber } = useLocalSearchParams();
-  const [pedido, setPedido] = useState<PedidoData | null>(null);
+  const [pedido, setPedido] = useState(null);
   const [loading, setLoading] = useState(true);
   const [acaoExecutada, setAcaoExecutada] = useState(false);
 
@@ -34,12 +22,12 @@ export default function BloodRequestDetails() {
   useEffect(() => {
     if (action && phoneNumber && pedido && !acaoExecutada) {
       console.log(`🚀 Executando ação automática: ${action} para ${phoneNumber}`);
-      executarAcaoAutomatica(action as string, phoneNumber as string);
+      executarAcaoAutomatica(action, phoneNumber);
       setAcaoExecutada(true);
     }
   }, [action, phoneNumber, pedido, acaoExecutada]);
 
-  const executarAcaoAutomatica = (acao: string, numero: string) => {
+  const executarAcaoAutomatica = (acao, numero) => {
     setTimeout(() => {
       switch (acao) {
         case 'call':
@@ -75,10 +63,10 @@ export default function BloodRequestDetails() {
         where('codigo', '==', id)
       );
       const snapshot = await getDocs(pedidosQuery);
-      
+
       if (!snapshot.empty) {
         const pedidoDoc = snapshot.docs[0];
-        const pedidoData = pedidoDoc.data() as PedidoData;
+        const pedidoData = pedidoDoc.data();
         console.log('✅ Pedido encontrado:', pedidoData.codigo);
         setPedido(pedidoData);
       } else {
@@ -94,12 +82,12 @@ export default function BloodRequestDetails() {
     }
   };
 
-  const formatarTelefoneParaLink = (telefone: string) => {
+  const formatarTelefoneParaLink = (telefone) => {
     if (!telefone) return null;
     return telefone.replace(/[^\d+]/g, '');
   };
 
-  const fazerLigacao = (telefone: string) => {
+  const fazerLigacao = (telefone) => {
     const numeroFormatado = formatarTelefoneParaLink(telefone);
     if (numeroFormatado) {
       console.log('📞 Abrindo discador para:', numeroFormatado);
@@ -112,7 +100,7 @@ export default function BloodRequestDetails() {
     }
   };
 
-  const enviarSMS = (telefone: string) => {
+  const enviarSMS = (telefone) => {
     const numeroFormatado = formatarTelefoneParaLink(telefone);
     if (numeroFormatado) {
       const message = `Olá, vi seu pedido urgente de sangue no app e gostaria de ajudar!`;
@@ -126,13 +114,13 @@ export default function BloodRequestDetails() {
     }
   };
 
-  const enviarWhatsApp = (telefone: string) => {
+  const enviarWhatsApp = (telefone) => {
     const numeroFormatado = formatarTelefoneParaLink(telefone);
     if (numeroFormatado) {
       const whatsappNumber = numeroFormatado.replace(/^\+/, '');
       const message = `Olá, vi seu pedido urgente de sangue no app e gostaria de ajudar!`;
       const whatsappUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
-      
+
       console.log('📱 Abrindo WhatsApp para:', whatsappNumber);
       Linking.openURL(whatsappUrl).catch(err => {
         console.error('❌ Erro ao abrir WhatsApp:', err);
@@ -143,7 +131,7 @@ export default function BloodRequestDetails() {
     }
   };
 
-  const handleAcaoContato = (tipo: string) => {
+  const handleAcaoContato = (tipo) => {
     if (!pedido?.telefone) {
       Alert.alert('Erro', 'Número de telefone não disponível');
       return;
@@ -162,16 +150,16 @@ export default function BloodRequestDetails() {
     }
   };
 
-  const getStatusInfo = (status: string) => {
+  const getStatusInfo = (status) => {
     switch (status) {
       case 'pending':
-        return { color: '#FF6B35', text: 'Pendente', icon: 'clock-o' as const };
+        return { color: '#FF6B35', text: 'Pendente', icon: 'clock-o' };
       case 'accepted':
-        return { color: '#4CAF50', text: 'Aceito', icon: 'check-circle' as const };
+        return { color: '#4CAF50', text: 'Aceito', icon: 'check-circle' };
       case 'completed':
-        return { color: '#2196F3', text: 'Concluído', icon: 'flag-checkered' as const };
+        return { color: '#2196F3', text: 'Concluído', icon: 'flag-checkered' };
       default:
-        return { color: '#666', text: 'Desconhecido', icon: 'question-circle' as const };
+        return { color: '#666', text: 'Desconhecido', icon: 'question-circle' };
     }
   };
 
@@ -198,9 +186,9 @@ export default function BloodRequestDetails() {
           <FontAwesome name="exclamation-triangle" size={64} color="#FFF" />
           <Text style={styles.errorTitle}>Pedido não encontrado</Text>
           <Text style={styles.errorSubtitle}>O pedido solicitado não foi encontrado em nosso sistema.</Text>
-          <Button 
-            mode="contained" 
-            onPress={() => router.back()} 
+          <Button
+            mode="contained"
+            onPress={() => router.back()}
             style={styles.backButton}
             contentStyle={styles.buttonContent}
             labelStyle={styles.buttonLabel}
@@ -216,31 +204,31 @@ export default function BloodRequestDetails() {
 
   return (
     <LinearGradient colors={['#FF4444', '#CC0000']} style={styles.container}>
-      <ScrollView 
+      <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
         {/* Header */}
         <View style={styles.header}>
-          <LinearGradient 
-            colors={['rgba(255,255,255,0.2)', 'rgba(255,255,255,0.1)']} 
+          <LinearGradient
+            colors={['rgba(255,255,255,0.2)', 'rgba(255,255,255,0.1)']}
             style={styles.iconContainer}
           >
             <FontAwesome name="tint" size={42} color="#FFF" />
           </LinearGradient>
           <Text style={styles.title}>Detalhes do Pedido</Text>
           <Text style={styles.subtitle}>Código: {pedido.codigo}</Text>
-          
+
           {action && (
             <View style={styles.actionBadge}>
-              <FontAwesome 
+              <FontAwesome
                 name={
-                  action === 'call' ? 'phone' as const : 
-                  action === 'sms' ? 'comment' as const : 
-                  'whatsapp' as const
-                } 
-                size={14} 
-                color="#FFF" 
+                  action === 'call' ? 'phone' :
+                  action === 'sms' ? 'comment' :
+                  'whatsapp'
+                }
+                size={14}
+                color="#FFF"
               />
               <Text style={styles.actionBadgeText}>
                 {action === 'call' ? 'Ligação' : action === 'sms' ? 'SMS' : 'WhatsApp'}
@@ -340,7 +328,7 @@ export default function BloodRequestDetails() {
             >
               Ligar
             </Button>
-            
+
             <Button
               mode="contained"
               icon={({ size, color }) => <FontAwesome name="comment" size={size} color={color} />}
@@ -351,7 +339,7 @@ export default function BloodRequestDetails() {
             >
               SMS
             </Button>
-            
+
             <Button
               mode="contained"
               icon={({ size, color }) => <FontAwesome name="whatsapp" size={size} color={color} />}

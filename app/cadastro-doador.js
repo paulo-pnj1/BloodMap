@@ -1,30 +1,53 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Dimensions, Alert, Animated, ScrollView } from 'react-native';
-import { Card, Button, TextInput, Title, Paragraph } from 'react-native-paper';
-import { Picker } from '@react-native-picker/picker';
-import { LinearGradient } from 'expo-linear-gradient';
+import { 
+  View, 
+  Text, 
+  StyleSheet, 
+  Alert, 
+  Animated, 
+  ScrollView, 
+  TouchableOpacity, 
+  Linking,
+  TextInput,
+  Pressable,
+  Platform,
+  Dimensions
+} from 'react-native';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 import * as Location from 'expo-location';
 import { router } from 'expo-router';
 import { auth, db } from '../src/services/firebase';
 import { FontAwesome } from '@expo/vector-icons';
+import { StatusBar } from 'expo-status-bar';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
+const TERMOS_USO_URL = 'https://exemplo.com/termos-bloodmap';
+
+const tiposSanguineos = ['O+', 'O-', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-'];
 
 export default function TelaCadastroDoador() {
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
   const [nome, setNome] = useState('');
   const [telefone, setTelefone] = useState('');
+  const [sexo, setSexo] = useState('M');
   const [tipoSanguineo, setTipoSanguineo] = useState('O+');
+  const [termosAceitos, setTermosAceitos] = useState(false);
   const [location, setLocation] = useState(null);
   const [loading, setLoading] = useState(false);
   const [locationLoading, setLocationLoading] = useState(false);
+  const [showSexoPicker, setShowSexoPicker] = useState(false);
+  const [showTipoPicker, setShowTipoPicker] = useState(false);
+
   const fadeAnim = useState(new Animated.Value(0))[0];
 
   useEffect(() => {
-    Animated.timing(fadeAnim, { toValue: 1, duration: 500, useNativeDriver: true }).start();
+    Animated.timing(fadeAnim, { 
+      toValue: 1, 
+      duration: 300, 
+      useNativeDriver: true 
+    }).start();
     obterLocalizacao();
   }, []);
 
@@ -33,7 +56,9 @@ export default function TelaCadastroDoador() {
     try {
       let { status } = await Location.requestForegroundPermissionsAsync();
       if (status === 'granted') {
-        let loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+        let loc = await Location.getCurrentPositionAsync({ 
+          accuracy: Location.Accuracy.High 
+        });
         setLocation(loc);
       } else {
         Alert.alert('Permissão Necessária', 'Precisamos da sua localização para conectar você com quem precisa de ajuda.');
@@ -44,31 +69,36 @@ export default function TelaCadastroDoador() {
     setLocationLoading(false);
   };
 
-  const handleCadastroCompleto = async () => {
+  const validar = () => {
     if (!email || !senha) {
       Alert.alert('Atenção', 'Preencha e-mail e senha.');
-      return;
+      return false;
     }
-
     if (!nome.trim()) {
-      Alert.alert('Atenção', 'Por favor, informe seu nome completo.');
-      return;
+      Alert.alert('Atenção', 'Informe seu nome completo.');
+      return false;
     }
-
     if (!telefone.trim()) {
-      Alert.alert('Atenção', 'Por favor, informe seu telefone para contato.');
-      return;
+      Alert.alert('Atenção', 'Informe seu telefone.');
+      return false;
     }
-
     if (!location) {
-      Alert.alert('Atenção', 'Precisamos da sua localização para conectar você com pessoas próximas.');
-      return;
+      Alert.alert('Atenção', 'Precisamos da sua localização.');
+      return false;
     }
-
     if (senha.length < 6) {
       Alert.alert('Atenção', 'A senha deve ter pelo menos 6 caracteres.');
-      return;
+      return false;
     }
+    if (!termosAceitos) {
+      Alert.alert('Atenção', 'Você precisa aceitar os termos de uso.');
+      return false;
+    }
+    return true;
+  };
+
+  const handleCadastro = async () => {
+    if (!validar()) return;
 
     setLoading(true);
     try {
@@ -77,6 +107,7 @@ export default function TelaCadastroDoador() {
 
       await setDoc(doc(db, 'usuarios', user.uid), {
         nome: nome.trim(),
+        sexo,
         tipoSanguineo,
         telefone: telefone.trim(),
         email: email.trim(),
@@ -85,359 +116,589 @@ export default function TelaCadastroDoador() {
           lng: location.coords.longitude 
         },
         disponivel: true,
+        termosAceitos: true,
+        termosAceitosEm: new Date().toISOString(),
+        compartilharLocalizacao: true,
+        historicoDoacoes: [],
         createdAt: new Date().toISOString(),
       });
 
       Alert.alert(
-        '🎉 Cadastro Concluído!', 
-        'Agora você faz parte da nossa rede de doadores. Sua ajuda pode salvar vidas!',
-        [{ text: 'Ver Meu Perfil', onPress: () => router.push('/perfil') }]
+        '✅ Cadastro Concluído!', 
+        'Agora você faz parte da nossa rede de doadores.',
+        [{ text: 'Ver Perfil', onPress: () => router.push('/perfil') }]
       );
     } catch (error) {
-      let mensagemErro = 'Não foi possível completar o cadastro. Tente novamente.';
-      
+      let mensagem = 'Não foi possível completar o cadastro.';
       switch (error.code) {
         case 'auth/email-already-in-use':
-          mensagemErro = 'Este e-mail já está em uso.';
+          mensagem = 'Este e-mail já está em uso.';
           break;
         case 'auth/invalid-email':
-          mensagemErro = 'E-mail inválido.';
+          mensagem = 'E-mail inválido.';
           break;
         case 'auth/weak-password':
-          mensagemErro = 'Senha muito fraca. Use pelo menos 6 caracteres.';
+          mensagem = 'Senha muito fraca. Use pelo menos 6 caracteres.';
           break;
-        default:
-          mensagemErro = error.message;
       }
-      
-      Alert.alert('Erro', mensagemErro);
-      console.error(error);
+      Alert.alert('Erro', mensagem);
     }
     setLoading(false);
   };
 
+  const PickerModal = ({ visible, onClose, options, selected, onSelect, title }) => {
+    if (!visible) return null;
+
+    return (
+      <View style={styles.pickerModal}>
+        <View style={styles.pickerContent}>
+          <Text style={styles.pickerTitle}>{title}</Text>
+          {options.map((option) => (
+            <Pressable
+              key={option}
+              style={[
+                styles.pickerOption,
+                selected === option && styles.pickerOptionSelected
+              ]}
+              onPress={() => {
+                onSelect(option);
+                onClose();
+              }}
+            >
+              <Text style={[
+                styles.pickerOptionText,
+                selected === option && styles.pickerOptionTextSelected
+              ]}>
+                {option === 'M' ? 'Masculino' : 
+                 option === 'F' ? 'Feminino' : option}
+              </Text>
+            </Pressable>
+          ))}
+          <Pressable style={styles.pickerClose} onPress={onClose}>
+            <Text style={styles.pickerCloseText}>Cancelar</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  };
+
   return (
-    <LinearGradient colors={['#DC2626', '#B91C1C']} style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+    <View style={styles.container}>
+      <StatusBar style="light" />
+      
+      {/* Header Fixo */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <FontAwesome name="arrow-left" size={20} color="white" />
+        </TouchableOpacity>
+        <View style={styles.headerTitleContainer}>
+          <FontAwesome name="heart" size={20} color="white" />
+          <Text style={styles.headerTitle}>Novo Doador</Text>
+        </View>
+        <View style={{ width: 40 }} />
+      </View>
+
+      <ScrollView 
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        bounces={false}
+      >
         <Animated.View style={[styles.content, { opacity: fadeAnim }]}>
           
-          <View style={styles.header}>
+          {/* Header do Conteúdo */}
+          <View style={styles.contentHeader}>
             <View style={styles.iconContainer}>
-              <FontAwesome name="heart" size={32} color="#FFF" />
+              <FontAwesome name="heart" size={30} color="#E53935" />
             </View>
             <Text style={styles.title}>Torne-se um Doador</Text>
             <Text style={styles.subtitle}>
-              Cadastre-se e faça parte da nossa rede de doadores
+              Faça parte da nossa rede e salve vidas
             </Text>
           </View>
 
-          <Card style={styles.formCard}>
-            <LinearGradient colors={['#FFF', '#FEF2F2']} style={styles.formGradient}>
-              
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Dados de Acesso</Text>
-                
-                <View style={styles.inputGroup}>
-                  <TextInput
-                    label="E-mail *"
-                    value={email}
-                    onChangeText={setEmail}
-                    mode="outlined"
-                    keyboardType="email-address"
-                    autoCapitalize="none"
-                    style={styles.input}
-                    outlineColor="#E5E5E5"
-                    activeOutlineColor="#DC2626"
-                    left={<TextInput.Icon icon="email" color="#666" />}
-                  />
-                </View>
+          {/* Formulário */}
+          <View style={styles.form}>
 
-                <View style={styles.inputGroup}>
-                  <TextInput
-                    label="Senha *"
-                    value={senha}
-                    onChangeText={setSenha}
-                    mode="outlined"
-                    secureTextEntry
-                    style={styles.input}
-                    outlineColor="#E5E5E5"
-                    activeOutlineColor="#DC2626"
-                    left={<TextInput.Icon icon="lock" color="#666" />}
-                  />
-                </View>
+            {/* E-mail */}
+            <View style={styles.inputGroup}>
+              <View style={styles.labelContainer}>
+                <Text style={styles.label}>E-mail</Text>
+                <Text style={styles.required}>*</Text>
               </View>
-
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Dados Pessoais</Text>
-                
-                <View style={styles.inputGroup}>
-                  <TextInput
-                    label="Nome Completo *"
-                    value={nome}
-                    onChangeText={setNome}
-                    mode="outlined"
-                    style={styles.input}
-                    outlineColor="#E5E5E5"
-                    activeOutlineColor="#DC2626"
-                    placeholder="Digite seu nome completo"
-                    left={<TextInput.Icon icon="account" color="#666" />}
-                  />
-                </View>
-
-                <View style={styles.inputGroup}>
-                  <TextInput
-                    label="Telefone *"
-                    value={telefone}
-                    onChangeText={setTelefone}
-                    keyboardType="phone-pad"
-                    mode="outlined"
-                    style={styles.input}
-                    outlineColor="#E5E5E5"
-                    activeOutlineColor="#DC2626"
-                    placeholder="(00) 00000-0000"
-                    left={<TextInput.Icon icon="phone" color="#666" />}
-                  />
-                </View>
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.label}>Seu Tipo Sanguíneo *</Text>
-                  <View style={styles.pickerContainer}>
-                    <Picker
-                      selectedValue={tipoSanguineo}
-                      onValueChange={setTipoSanguineo}
-                      style={styles.picker}
-                    >
-                      <Picker.Item label="O+" value="O+" />
-                      <Picker.Item label="O-" value="O-" />
-                      <Picker.Item label="A+" value="A+" />
-                      <Picker.Item label="A-" value="A-" />
-                      <Picker.Item label="B+" value="B+" />
-                      <Picker.Item label="B-" value="B-" />
-                      <Picker.Item label="AB+" value="AB+" />
-                      <Picker.Item label="AB-" value="AB-" />
-                    </Picker>
-                  </View>
-                </View>
+              <View style={styles.inputContainer}>
+                <FontAwesome name="envelope" size={16} color="#999" style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  value={email}
+                  onChangeText={setEmail}
+                  placeholder="seu@email.com"
+                  placeholderTextColor="#999"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                />
               </View>
+            </View>
 
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Localização</Text>
-                <Card style={styles.locationCard}>
-                  <View style={styles.locationContent}>
-                    <FontAwesome name="map-marker" size={20} color="#DC2626" />
-                    <View style={styles.locationTextContainer}>
-                      <Text style={styles.locationStatus}>
-                        {location ? 'Localização obtida ✓' : 'Aguardando localização...'}
-                      </Text>
-                      <Text style={styles.locationCoords}>
-                        {location 
-                          ? `${location.coords.latitude.toFixed(4)}, ${location.coords.longitude.toFixed(4)}`
-                          : 'Clique no botão abaixo para obter'
-                        }
-                      </Text>
-                    </View>
-                  </View>
-                </Card>
-                
-                <Button
-                  icon="crosshairs-gps"
-                  mode="outlined"
-                  onPress={obterLocalizacao}
-                  loading={locationLoading}
-                  disabled={locationLoading}
-                  style={styles.locationButton}
-                  contentStyle={styles.locationButtonContent}
-                >
-                  {locationLoading ? 'Obtendo...' : 'Atualizar Localização'}
-                </Button>
+            {/* Senha */}
+            <View style={styles.inputGroup}>
+              <View style={styles.labelContainer}>
+                <Text style={styles.label}>Senha</Text>
+                <Text style={styles.required}>*</Text>
               </View>
+              <View style={styles.inputContainer}>
+                <FontAwesome name="lock" size={16} color="#999" style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  value={senha}
+                  onChangeText={setSenha}
+                  placeholder="Mínimo 6 caracteres"
+                  placeholderTextColor="#999"
+                  secureTextEntry
+                />
+              </View>
+            </View>
 
-              <Button
-                icon="heart-plus"
-                mode="contained"
-                onPress={handleCadastroCompleto}
-                loading={loading}
-                disabled={loading || !location}
-                style={styles.primaryButton}
-                contentStyle={styles.buttonContent}
+            {/* Nome */}
+            <View style={styles.inputGroup}>
+              <View style={styles.labelContainer}>
+                <Text style={styles.label}>Nome Completo</Text>
+                <Text style={styles.required}>*</Text>
+              </View>
+              <View style={styles.inputContainer}>
+                <FontAwesome name="user" size={16} color="#999" style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  value={nome}
+                  onChangeText={setNome}
+                  placeholder="Digite seu nome"
+                  placeholderTextColor="#999"
+                />
+              </View>
+            </View>
+
+            {/* Telefone */}
+            <View style={styles.inputGroup}>
+              <View style={styles.labelContainer}>
+                <Text style={styles.label}>Telefone</Text>
+                <Text style={styles.required}>*</Text>
+              </View>
+              <View style={styles.inputContainer}>
+                <FontAwesome name="phone" size={16} color="#999" style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  value={telefone}
+                  onChangeText={setTelefone}
+                  placeholder="(00) 00000-0000"
+                  placeholderTextColor="#999"
+                  keyboardType="phone-pad"
+                />
+              </View>
+            </View>
+
+            {/* Sexo */}
+            <View style={styles.inputGroup}>
+              <View style={styles.labelContainer}>
+                <Text style={styles.label}>Sexo</Text>
+                <Text style={styles.required}>*</Text>
+              </View>
+              <Pressable
+                style={styles.picker}
+                onPress={() => setShowSexoPicker(true)}
               >
+                <Text style={styles.pickerText}>
+                  {sexo === 'M' ? 'Masculino' : 'Feminino'}
+                </Text>
+                <FontAwesome name="chevron-down" size={14} color="#666" />
+              </Pressable>
+            </View>
+
+            {/* Tipo Sanguíneo */}
+            <View style={styles.inputGroup}>
+              <View style={styles.labelContainer}>
+                <Text style={styles.label}>Tipo Sanguíneo</Text>
+                <Text style={styles.required}>*</Text>
+              </View>
+              <Pressable
+                style={styles.picker}
+                onPress={() => setShowTipoPicker(true)}
+              >
+                <Text style={styles.pickerText}>{tipoSanguineo}</Text>
+                <FontAwesome name="chevron-down" size={14} color="#666" />
+              </Pressable>
+            </View>
+
+            {/* Termos */}
+            <Pressable 
+              style={styles.termosRow}
+              onPress={() => setTermosAceitos(!termosAceitos)}
+            >
+              <View style={[styles.checkbox, termosAceitos && styles.checkboxChecked]}>
+                {termosAceitos && <FontAwesome name="check" size={12} color="white" />}
+              </View>
+              <Text style={styles.termosText}>
+                Li e aceito os{' '}
+                <Text style={styles.termosLink} onPress={() => Linking.openURL(TERMOS_USO_URL)}>
+                  termos de uso
+                </Text>
+                <Text style={styles.required}> *</Text>
+              </Text>
+            </Pressable>
+
+            {/* Localização */}
+            <View style={styles.locationCard}>
+              <View style={styles.locationRow}>
+                <FontAwesome 
+                  name={location ? "check-circle" : "map-marker"} 
+                  size={16} 
+                  color={location ? "#4CAF50" : "#E53935"} 
+                />
+                <Text style={[styles.locationText, location && styles.locationTextOk]}>
+                  {location ? 'Localização obtida' : 'Aguardando localização...'}
+                </Text>
+                {!location && (
+                  <TouchableOpacity onPress={obterLocalizacao} disabled={locationLoading}>
+                    <Text style={styles.locationButton}>
+                      {locationLoading ? '...' : 'Obter'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+              {location && (
+                <Text style={styles.locationCoords}>
+                  {location.coords.latitude.toFixed(4)}, {location.coords.longitude.toFixed(4)}
+                </Text>
+              )}
+            </View>
+
+            {/* Botão Cadastrar */}
+            <TouchableOpacity
+              style={[
+                styles.registerButton,
+                (loading || !location) && styles.registerButtonDisabled
+              ]}
+              onPress={handleCadastro}
+              disabled={loading || !location}
+            >
+              <Text style={styles.registerButtonText}>
                 {loading ? 'Cadastrando...' : 'Registrar e Tornar-se Doador'}
-              </Button>
+              </Text>
+            </TouchableOpacity>
 
-              <Button 
-                mode="text" 
-                onPress={() => router.push('/login')}
-                style={styles.loginButton}
-                labelStyle={styles.loginButtonText}
-                icon="login"
-              >
-                Já tem uma conta? Fazer login
-              </Button>
+            {/* Links */}
+            <TouchableOpacity 
+              style={styles.linkButton}
+              onPress={() => router.push('/login')}
+            >
+              <Text style={styles.linkText}>Já tem conta? Fazer login</Text>
+            </TouchableOpacity>
 
-              <Button
-                icon="arrow-left"
-                mode="text"
-                onPress={() => router.push('/')}
-                style={styles.backButton}
-                labelStyle={styles.backButtonText}
-              >
-                Voltar para o Mapa
-              </Button>
+            <TouchableOpacity 
+              style={styles.linkButton}
+              onPress={() => router.push('/')}
+            >
+              <Text style={styles.linkText}>← Voltar para o Mapa</Text>
+            </TouchableOpacity>
 
-            </LinearGradient>
-          </Card>
+          </View>
         </Animated.View>
       </ScrollView>
-    </LinearGradient>
+
+      {/* Modais */}
+      <PickerModal
+        visible={showSexoPicker}
+        onClose={() => setShowSexoPicker(false)}
+        options={['M', 'F']}
+        selected={sexo}
+        onSelect={setSexo}
+        title="Selecione o sexo"
+      />
+
+      <PickerModal
+        visible={showTipoPicker}
+        onClose={() => setShowTipoPicker(false)}
+        options={tiposSanguineos}
+        selected={tipoSanguineo}
+        onSelect={setTipoSanguineo}
+        title="Selecione o tipo sanguíneo"
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { 
+  container: {
     flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    justifyContent: 'center',
-    paddingVertical: 20,
-  },
-  content: {
-    alignItems: 'center',
-    paddingHorizontal: 20,
+    backgroundColor: '#F5F5F5',
   },
   header: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 30,
+    justifyContent: 'space-between',
+    paddingTop: Platform.OS === 'ios' ? 50 : 45,
+    paddingBottom: 12,
+    paddingHorizontal: 16,
+    backgroundColor: '#E53935',
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    zIndex: 100,
   },
-  iconContainer: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: 'rgba(255,255,255,0.2)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 15,
+  },
+  headerTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: 'white',
+  },
+  scroll: {
+    flexGrow: 1,
+    paddingVertical: 16,
+  },
+  content: {
+    alignItems: 'center',
+    paddingHorizontal: 16,
+  },
+  contentHeader: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  iconContainer: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#FFEBEE',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 10,
+    borderWidth: 2,
+    borderColor: '#E53935',
   },
   title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#FFF',
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  subtitle: {
-    fontSize: 16,
-    color: 'rgba(255,255,255,0.9)',
-    textAlign: 'center',
-    lineHeight: 22,
-    paddingHorizontal: 20,
-  },
-  formCard: {
-    width: width * 0.9,
-    borderRadius: 20,
-    overflow: 'hidden',
-    elevation: 8,
-    shadowColor: '#0f0404ff',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    marginBottom:30,
-  },
-  formGradient: {
-    padding: 25,
-  },
-  section: {
-    marginBottom: 5,
-  },
-  sectionTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: 'bold',
     color: '#333',
     marginBottom: 4,
-    borderBottomWidth: 2,
-    borderBottomColor: '#DC2626',
-    paddingBottom: 5,
+    textAlign: 'center',
+  },
+  subtitle: {
+    fontSize: 12,
+    color: '#666',
+    textAlign: 'center',
+    paddingHorizontal: 16,
+  },
+  form: {
+    width: '100%',
+    maxWidth: 400,
+    backgroundColor: 'white',
+    borderRadius: 16,
+    padding: 16,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    alignSelf: 'center',
   },
   inputGroup: {
-    marginBottom: 20,
+    marginBottom: 14,
   },
-  label: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 8,
-  },
-  input: {
-    backgroundColor: '#FFF',
-    fontSize: 16,
-  },
-  pickerContainer: {
-    borderWidth: 1,
-    borderColor: '#E5E5E5',
-    borderRadius: 8,
-    overflow: 'hidden',
-    backgroundColor: '#FFF',
-  },
-  picker: {
-    height: 50,
-  },
-  locationCard: {
-    backgroundColor: '#FEF2F2',
-    borderColor: '#DC2626',
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 15,
-    marginBottom: 12,
-  },
-  locationContent: {
+  labelContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginBottom: 4,
   },
-  locationTextContainer: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  locationStatus: {
-    fontSize: 14,
+  label: {
+    fontSize: 13,
     fontWeight: '600',
-    color: '#DC2626',
-    marginBottom: 2,
+    color: '#333',
   },
-  locationCoords: {
+  required: {
+    fontSize: 14,
+    color: '#E53935',
+    marginLeft: 4,
+    fontWeight: 'bold',
+  },
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    borderRadius: 8,
+    backgroundColor: 'white',
+    height: 42,
+  },
+  inputIcon: {
+    paddingHorizontal: 8,
+  },
+  input: {
+    flex: 1,
+    fontSize: 14,
+    color: '#333',
+    paddingVertical: 6,
+    paddingRight: 10,
+  },
+  picker: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    backgroundColor: 'white',
+    height: 42,
+  },
+  pickerText: {
+    fontSize: 14,
+    color: '#333',
+  },
+  termosRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: '#E53935',
+    marginRight: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: '#E53935',
+  },
+  termosText: {
+    flex: 1,
+    fontSize: 12,
+    color: '#333',
+  },
+  termosLink: {
+    color: '#E53935',
+    fontWeight: '600',
+  },
+  locationCard: {
+    backgroundColor: '#F5F5F5',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 16,
+  },
+  locationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  locationText: {
+    flex: 1,
     fontSize: 12,
     color: '#666',
   },
+  locationTextOk: {
+    color: '#4CAF50',
+    fontWeight: '500',
+  },
   locationButton: {
-    borderColor: '#DC2626',
+    color: '#E53935',
+    fontSize: 12,
+    fontWeight: '600',
+    paddingHorizontal: 8,
+  },
+  locationCoords: {
+    fontSize: 10,
+    color: '#999',
+    marginTop: 4,
+    marginLeft: 22,
+  },
+  registerButton: {
+    backgroundColor: '#E53935',
     borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginBottom: 10,
   },
-  locationButtonContent: {
-    paddingVertical: 6,
+  registerButtonDisabled: {
+    backgroundColor: '#FFCDD2',
   },
-  primaryButton: {
-    borderRadius: 12,
-    elevation: 4,
-    shadowColor: '#DC2626',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    marginBottom: 15,
-    backgroundColor: '#DC2626',
+  registerButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
   },
-  buttonContent: {
+  linkButton: {
     paddingVertical: 8,
+    alignItems: 'center',
   },
-  loginButton: {
-    marginBottom: 15,
-  },
-  loginButtonText: {
+  linkText: {
     color: '#666',
+    fontSize: 12,
   },
-  backButton: {
-    marginTop: 10,
+  pickerModal: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
   },
-  backButtonText: {
-    color: '#666',
-   
+  pickerContent: {
+    backgroundColor: 'white',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 16,
+  },
+  pickerTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  pickerOption: {
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    marginBottom: 2,
+  },
+  pickerOptionSelected: {
+    backgroundColor: '#FFEBEE',
+  },
+  pickerOptionText: {
+    fontSize: 14,
+    color: '#333',
+  },
+  pickerOptionTextSelected: {
+    color: '#E53935',
+    fontWeight: '600',
+  },
+  pickerClose: {
+    marginTop: 12,
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: '#EEE',
+  },
+  pickerCloseText: {
+    fontSize: 13,
+    color: '#999',
+    fontWeight: '500',
   },
 });
