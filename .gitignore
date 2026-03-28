@@ -30,8 +30,9 @@ yarn-error.*
 .DS_Store
 *.pem
 
-# local env files
+# local env file
 .env*.local
+.env
 
 # typescript
 *.tsbuildinfo
@@ -39,3 +40,14 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Firebase
+.firebase/
+firebase-debug.log
+firestore-debug.log
+storage-debug.log
+
+# Service account keys — NUNCA commitas
+*service-account*.json
+*serviceAccount*.json
+*firebase-adminsdk*.json
